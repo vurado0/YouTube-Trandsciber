@@ -3,10 +3,18 @@
 #
 # Requests to YouTube still leave from this machine's connection, which is why
 # this works where a cloud deployment does not.
+#
+#   ./share.sh                                  random trycloudflare.com address
+#   TUNNEL_HOSTNAME=study.example.com ./share.sh    your own domain, fixed
+#
+# For the second form, see "Using your own domain" in the README — it needs a
+# one-time `cloudflared tunnel login` and a DNS route.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 PORT="${PORT:-8000}"
+TUNNEL_NAME="${TUNNEL_NAME:-transcript-study}"
+TUNNEL_HOSTNAME="${TUNNEL_HOSTNAME:-}"
 
 [ -d .venv ] || { echo "Run ./setup.sh first."; exit 1; }
 command -v cloudflared >/dev/null || {
@@ -36,8 +44,26 @@ else
 fi
 
 echo
+
+if [ -n "$TUNNEL_HOSTNAME" ]; then
+  if ! cloudflared tunnel info "$TUNNEL_NAME" >/dev/null 2>&1; then
+    echo "No tunnel named '$TUNNEL_NAME' yet. One-time setup:"
+    echo
+    echo "  cloudflared tunnel login"
+    echo "  cloudflared tunnel create $TUNNEL_NAME"
+    echo "  cloudflared tunnel route dns $TUNNEL_NAME $TUNNEL_HOSTNAME"
+    echo
+    exit 1
+  fi
+  echo "Serving on https://$TUNNEL_HOSTNAME — this address is yours and does"
+  echo "not change. Ctrl-C to stop sharing."
+  echo
+  exec cloudflared tunnel run --url "http://127.0.0.1:$PORT" "$TUNNEL_NAME"
+fi
+
 echo "Opening a tunnel. The https://… trycloudflare.com address below is your"
 echo "phone URL. It is public to anyone who has it, and changes each run."
+echo "Set TUNNEL_HOSTNAME to use your own domain instead."
 echo "Press Ctrl-C to close the tunnel and stop sharing."
 echo
 

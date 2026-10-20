@@ -145,8 +145,34 @@ sharing. Everything works over it — Whisper, MP4/MP3, furigana.
 Two things to know. The address is public to anyone who has it, and the app has
 no login, so whoever opens it can run transcriptions on your laptop and
 download through your connection; it is unguessable, but do not post it
-anywhere. And it is a new address every run — for a fixed hostname you need a
-Cloudflare account with a domain, and a named tunnel.
+anywhere. And it is **a new address every run** — quick tunnels cannot keep
+theirs, and a stopped one is gone for good.
+
+#### Using your own domain
+
+For a fixed, readable address like `study.example.com`, you need a domain whose
+DNS is hosted on Cloudflare. The tunnel itself is free on every Cloudflare plan;
+the domain is the only cost, from a few euros a year. Registering it at
+Cloudflare Registrar is the least work, because the DNS is then already in the
+right place — otherwise point your registrar's nameservers at Cloudflare first.
+
+One-time setup:
+
+```bash
+cloudflared tunnel login                  # pick your domain in the browser
+cloudflared tunnel create transcript-study
+cloudflared tunnel route dns transcript-study study.example.com
+```
+
+After that, every time:
+
+```bash
+TUNNEL_HOSTNAME=study.example.com ./share.sh
+```
+
+The address is now stable across restarts and reboots, and there is no
+interstitial page. To have it come back by itself after a reboot, install
+cloudflared as a service with `cloudflared service install`.
 
 ### Docker, for everything at once
 
