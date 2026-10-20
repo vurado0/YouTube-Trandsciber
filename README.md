@@ -124,6 +124,28 @@ Two ways round it, both with real costs:
 If neither appeals, run it locally — that path has no blocking problem at all,
 and is what this tool is really built for.
 
+### Using it from your phone
+
+The thing a cloud deployment cannot do is reach YouTube, because requests from
+datacenter IPs get blocked. A tunnel sidesteps that entirely: the app stays on
+your machine, so YouTube still sees your home connection, and you get a public
+HTTPS URL to open on a phone.
+
+```bash
+brew install cloudflared
+./share.sh
+```
+
+It starts the server if it is not already running, opens the tunnel, and prints
+a `https://….trycloudflare.com` address. Open that on your phone. Ctrl-C stops
+sharing. Everything works over it — Whisper, MP4/MP3, furigana.
+
+Two things to know. The address is public to anyone who has it, and the app has
+no login, so whoever opens it can run transcriptions on your laptop and
+download through your connection; it is unguessable, but do not post it
+anywhere. And it is a new address every run — for a fixed hostname you need a
+Cloudflare account with a domain, and a named tunnel.
+
 ### Docker, for everything at once
 
 A persistent container keeps every feature, Whisper and downloads included.
@@ -217,6 +239,7 @@ pyproject.toml    Vercel entrypoint config
 vercel.json       Vercel function settings
 Dockerfile        container image for a persistent host
 fly.toml          Fly.io deployment config
+share.sh          put the local app on a public URL via Cloudflare
 ```
 
 No build step and no frontend framework — edit a file, reload the page.

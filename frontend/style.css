@@ -367,6 +367,14 @@ ruby rt {
   .transcript { padding-bottom: 24px; }
 }
 
+@media (max-width: 520px) {
+  /* Give the link field a row of its own; sharing the row with the language
+     picker and the button leaves it too narrow to read a pasted URL. */
+  .loader { flex-wrap: wrap; }
+  .loader input[type="text"] { flex: 1 1 100%; }
+  .loader select { flex: 1 1 auto; }
+}
+
 @media (max-width: 720px) {
   .topbar { flex-wrap: wrap; padding: 10px 14px; gap: 10px; }
   .brand-name { display: none; }
