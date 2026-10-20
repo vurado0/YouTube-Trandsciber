@@ -1,0 +1,45 @@
+# fly.toml — rename `app` to something unique, then: fly launch --copy-config
+app = "transcript-study"
+primary_region = "fra"
+
+[build]
+  [build.args]
+    # Set to "1" to bake in offline Whisper transcription (adds ~300 MB to the
+    # image, and the speech model downloads on first use).
+    WITH_WHISPER = "0"
+
+[env]
+  PORT = "8000"
+  TRUST_PROXY = "1"
+  WORK_DIR = "/data"
+
+  # Offline transcription. Needs a machine with real CPU and several GB of RAM;
+  # on a shared instance it will tie the box up for minutes per video.
+  ENABLE_WHISPER = "0"
+
+  # MP4/MP3 downloads. Off by default on purpose: a publicly reachable YouTube
+  # downloader is likely to breach your host's terms of service, and it gets the
+  # instance IP-blocked by YouTube far faster than caption fetching does.
+  # Set to "1" if you accept that.
+  ENABLE_DOWNLOADS = "0"
+
+  MAX_CONCURRENT_JOBS = "2"
+  RATE_LIMIT_PER_HOUR = "40"
+  MAX_DURATION_SECONDS = "2700"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+# Keeps cached transcripts and in-flight downloads across restarts.
+[[mounts]]
+  source = "transcript_data"
+  destination = "/data"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1

@@ -3,8 +3,8 @@
 Paste a YouTube link, get a time-synced transcript you can actually study from.
 Built for learning **English**, **German** and **Japanese**.
 
-It runs entirely on your own machine — there is no account, no API key and no
-upload. The only thing that leaves your laptop is the request to YouTube.
+Runs on your own machine by default — no account, no API key, nothing uploaded.
+The only thing that leaves your laptop is the request to YouTube.
 
 ![Study view](docs/screenshot-ja.png)
 
@@ -25,6 +25,7 @@ upload. The only thing that leaves your laptop is the request to YouTube.
   when you want to test yourself.
 * **Hide-the-text mode** for pure listening practice: the transcript blurs out and
   only the line currently being spoken stays readable.
+* **Saves the video** as MP4, or just the audio as MP3, for studying offline.
 
 ## Setup
 
@@ -65,42 +66,111 @@ To use a different port: `PORT=9000 ./run.sh`.
 | `H` | Hide the text (listening mode) |
 | `/` | Jump to the search box |
 
+## Deploying it
+
+This needs a **persistent container host** — Fly.io, Railway, Render, or any box
+that can run Docker.
+
+```bash
+docker build -t transcript-study .
+docker run -p 8000:8000 -v transcript-data:/data transcript-study
+```
+
+On Fly.io, edit the `app` name in `fly.toml`, then:
+
+```bash
+fly launch --copy-config
+fly volumes create transcript_data --size 3
+fly deploy
+```
+
+Add `--build-arg WITH_WHISPER=1` to the build (or set it in `fly.toml`) if you
+want offline transcription on the server. It adds ~300 MB to the image and needs
+a machine with real CPU and a few GB of RAM.
+
+### It does not work on Vercel
+
+Serverless is the wrong shape for this, and the entrypoint error you get first is
+the least of it:
+
+* Transcription runs as a background job that the browser polls. Serverless
+  functions are frozen the moment they return a response, and the next poll can
+  land on a different instance, so the job never finishes.
+* `unidic-lite`, the Japanese dictionary, is 248 MB on its own — the function
+  size limit is 250 MB.
+* Whisper needs an ffmpeg binary, a ~500 MB model and minutes of CPU, against a
+  timeout measured in seconds.
+* YouTube rate-limits and bot-blocks datacenter IPs, which breaks even the
+  lightweight caption path.
+
+That last point applies to *any* host, not just Vercel. Expect a deployed
+instance to hit "Sign in to confirm you're not a bot" sooner or later.
+
+### Configuration
+
+All of these are environment variables. The defaults in `Dockerfile` and
+`fly.toml` are tuned for a shared instance; running locally everything is on.
+
+| Variable | Default (local / container) | What it does |
+| --- | --- | --- |
+| `ENABLE_WHISPER` | on / **off** | Offline transcription for caption-less videos |
+| `ENABLE_DOWNLOADS` | on / **off** | The MP4 and MP3 buttons |
+| `MAX_CONCURRENT_JOBS` | 2 | Jobs running at once; the rest queue |
+| `RATE_LIMIT_PER_HOUR` | 40 | Requests per IP per hour, 0 to disable |
+| `MAX_DURATION_SECONDS` | 0 / 2700 | Reject videos longer than this, 0 for no limit |
+| `TRUST_PROXY` | off / **on** | Read the client IP from the proxy header |
+| `WORK_DIR` | `./cache` | Where transcripts and prepared files live |
+| `PORT` | 8000 | Port to listen on |
+
+**Downloads are off by default in the container on purpose.** A publicly
+reachable YouTube downloader will likely breach your host's terms of service,
+and it gets the instance IP-blocked by YouTube much faster than caption fetching
+does. Set `ENABLE_DOWNLOADS=1` if you accept that. The app has no login, so
+anyone with the URL can use whatever you switch on.
+
 ## How a video gets transcribed
 
-1. `yt-dlp` is asked what caption tracks the video has.
-2. If a track exists in the language you picked, it is downloaded as `json3` —
+1. The link is reduced to its 11-character video id and a clean watch URL is
+   rebuilt from it. User input never reaches yt-dlp directly — otherwise it
+   would happily fetch anything, including addresses on the host's own network.
+2. `yt-dlp` is asked what caption tracks the video has.
+3. If a track exists in the language you picked, it is downloaded as `json3` —
    YouTube's caption format, which carries per-word timings for automatic
    captions. Machine-translated tracks are skipped on purpose: a German track
    auto-translated from English reads badly and teaches you the wrong phrasing.
-3. Caption fragments get merged into sentence-sized lines, because YouTube cuts
+4. Caption fragments get merged into sentence-sized lines, because YouTube cuts
    them into two-second scraps that are hard to read.
-4. If there is no usable track, the audio is downloaded, converted to 16 kHz mono
+5. If there is no usable track, the audio is downloaded, converted to 16 kHz mono
    with `ffmpeg`, and run through `faster-whisper`.
-5. Japanese transcripts are tokenised with MeCab (`fugashi` + `unidic-lite`) to
+6. Japanese transcripts are tokenised with MeCab (`fugashi` + `unidic-lite`) to
    get word boundaries and readings, and the readings are aligned to the kanji so
    the okurigana stays out of the ruby text.
-6. The result is cached in `cache/` so reopening a video is instant.
+7. The result is cached so reopening a video is instant.
 
 ## Project layout
 
 ```
 backend/
-  app.py          FastAPI server, job queue, caching
+  app.py          FastAPI server, job queue, limits, caching
   captions.py     yt-dlp caption fetching, json3 parsing, sentence chunking
   whisper_asr.py  offline speech-to-text fallback
+  downloads.py    MP4 and MP3 export
   japanese.py     tokenisation and furigana alignment
 frontend/
   index.html      the whole UI
-  app.js          player sync, word list, exports
+  app.js          player sync, word list, exports, downloads
   style.css       light and dark themes
+Dockerfile        container image for a persistent host
+fly.toml          Fly.io deployment config
 ```
 
 No build step and no frontend framework — edit a file, reload the page.
 
 ## Known limits
 
-* **Only you can use it.** It listens on `127.0.0.1` and is not hardened for the
-  open internet. Keep it local.
+* **There is no login.** Anything you switch on is available to anyone who has
+  the URL. Keep the instance private, or put it behind your host's access
+  control.
 * **Automatic captions are imperfect.** They lack punctuation on some channels
   and mishear names. For serious study, prefer videos with real subtitles.
 * **Whisper is slow on a CPU.** Roughly real-time on Apple Silicon with the
@@ -109,9 +179,8 @@ No build step and no frontend framework — edit a file, reload the page.
   `base` for speed or `medium` for accuracy.
 * **Age-restricted and private videos won't load.** yt-dlp cannot reach them
   without signing in.
-* Downloading audio from YouTube may conflict with its Terms of Service. The
-  caption path, which is what you will use most of the time, does not download
-  any media.
+* Downloading media from YouTube may conflict with its Terms of Service. The
+  caption path, which is what you will use most of the time, downloads no media.
 
 ## Licence
 

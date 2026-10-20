@@ -11,14 +11,20 @@ import wave
 from pathlib import Path
 from typing import Callable
 
-import numpy as np
 import yt_dlp
 
+import captions
+
+# Both of these ship only with the Whisper extra. Without them the app still
+# runs, it just cannot transcribe caption-less videos — so the import must not
+# be allowed to take the whole server down.
 try:
+    import numpy as np
     from faster_whisper import WhisperModel
 
     AVAILABLE = True
 except Exception:  # pragma: no cover - optional dependency
+    np = None
     WhisperModel = None
     AVAILABLE = False
 
@@ -57,7 +63,7 @@ def download_audio(url: str, target_dir: Path, progress: Callable[[str, int], No
         "postprocessor_args": ["-ar", "16000", "-ac", "1"],
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
-        ydl.download([url])
+        ydl.download([captions.canonical_url(url)])
 
     files = sorted(target_dir.glob("audio.*"))
     wav = [path for path in files if path.suffix == ".wav"]

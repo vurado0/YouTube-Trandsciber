@@ -12,6 +12,7 @@ const state = {
   follow: true,
   player: null,
   ready: false,
+  caps: {},
   words: [],         // saved vocabulary for the current video
 };
 
@@ -53,6 +54,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("[data-export]").forEach((button) =>
     button.addEventListener("click", () => exportTranscript(button.dataset.export))
   );
+  document.querySelectorAll("[data-save]").forEach((button) =>
+    button.addEventListener("click", () => saveVideo(button.dataset.save, button))
+  );
 
   document.addEventListener("keydown", onKey);
 
@@ -69,6 +73,7 @@ document.addEventListener("DOMContentLoaded", () => {
 async function loadCapabilities() {
   try {
     const caps = await (await fetch("/api/capabilities")).json();
+    state.caps = caps;
     const notes = [];
     notes.push(
       caps.whisper
@@ -76,6 +81,7 @@ async function loadCapabilities() {
         : "Offline transcription is off — videos without captions will fail. Run ./setup.sh --with-whisper."
     );
     if (!caps.furigana) notes.push("Furigana is off — run ./setup.sh to install the Japanese tokenizer.");
+    if (caps.downloads) notes.push("You can also save a video as MP4 or its audio as MP3.");
     $("capability-note").textContent = notes.join(" ");
   } catch {
     /* the note is cosmetic */
@@ -144,6 +150,9 @@ function openStudy(meta, result) {
   $("study").classList.toggle("ja", state.lang === "ja");
   $("furigana-field").style.display =
     state.lang === "ja" && state.segments.some((seg) => seg.tokens) ? "" : "none";
+
+  $("save-row").hidden = !state.caps.downloads;
+  $("save-status").textContent = "";
 
   renderTranscript();
   renderWords();
@@ -576,6 +585,55 @@ function exportCsv() {
         .join(",")
     );
   download(`${state.video.id}-words.csv`, "Word,Reading,Sentence,Source\n" + rows.join("\n") + "\n");
+}
+
+async function saveVideo(kind, button) {
+  const buttons = document.querySelectorAll("[data-save]");
+  buttons.forEach((item) => (item.disabled = true));
+  const status = $("save-status");
+  status.textContent = "starting…";
+
+  try {
+    const start = await post("/api/download", {
+      url: `https://www.youtube.com/watch?v=${state.video.id}`,
+      kind,
+    });
+    if (start.error) throw new Error(start.error);
+
+    for (;;) {
+      await sleep(900);
+      const job = await (await fetch(`/api/job/${start.job}`)).json();
+      if (job.error && !job.status) throw new Error(job.error);
+      if (job.status === "error") throw new Error(job.error);
+
+      status.textContent = `${job.stage || "working"} ${job.percent || 0}%`;
+
+      if (job.status === "done") {
+        // The file is served once and cleaned up server-side after a while;
+        // navigating to it hands it straight to the browser's downloader.
+        status.textContent = `${job.filename} (${formatSize(job.size)})`;
+        const anchor = document.createElement("a");
+        anchor.href = `/api/file/${start.job}`;
+        anchor.download = job.filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        toast(`Saving ${kind.toUpperCase()}`);
+        return;
+      }
+    }
+  } catch (error) {
+    status.textContent = "";
+    toast(error.message);
+  } finally {
+    buttons.forEach((item) => (item.disabled = false));
+  }
+}
+
+function formatSize(bytes) {
+  if (!bytes) return "";
+  const mb = bytes / 1048576;
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb.toFixed(1)} MB`;
 }
 
 function download(filename, text) {

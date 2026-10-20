@@ -33,6 +33,17 @@ def video_id(url: str) -> str:
     raise CaptionError("That does not look like a YouTube link.")
 
 
+def canonical_url(url: str) -> str:
+    """Rebuild a clean watch URL from the video id.
+
+    Never hand a user-supplied string to yt-dlp directly: it will happily fetch
+    any URL, including one pointing at something on the host's own network. We
+    extract the 11-character id and build the URL ourselves, so the only thing
+    that can ever be fetched is a YouTube video.
+    """
+    return f"https://www.youtube.com/watch?v={video_id(url)}"
+
+
 def probe(url: str) -> dict:
     """Return video metadata plus which caption languages are actually usable."""
     opts = {
@@ -43,7 +54,7 @@ def probe(url: str) -> dict:
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
         try:
-            info = ydl.extract_info(url, download=False)
+            info = ydl.extract_info(canonical_url(url), download=False)
         except yt_dlp.utils.DownloadError as exc:
             raise CaptionError(f"YouTube rejected that link: {_clean(str(exc))}") from exc
 
