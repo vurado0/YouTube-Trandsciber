@@ -25,7 +25,9 @@ The only thing that leaves your laptop is the request to YouTube.
   when you want to test yourself.
 * **Hide-the-text mode** for pure listening practice: the transcript blurs out and
   only the line currently being spoken stays readable.
-* **Saves the video** as MP4, or just the audio as MP3, for studying offline.
+* **Saves the video** as MP4 at whatever resolution you pick, or just the audio
+  as MP3, for studying offline. The menu lists only the resolutions that
+  video actually has.
 
 ## Setup
 

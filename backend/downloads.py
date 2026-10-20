@@ -16,9 +16,9 @@ KINDS = {
     "mp3": "Audio (MP3)",
 }
 
-# Cap the resolution: 4K files are huge, slow, and rarely what anyone studying
-# a language actually wants.
-MAX_HEIGHT = 1080
+# Used when the caller does not name a height. 4K files are huge, slow, and
+# rarely what anyone studying a language wants.
+DEFAULT_HEIGHT = 1080
 
 
 class DownloadError(Exception):
@@ -30,10 +30,12 @@ def prepare(
     kind: str,
     target_dir: Path,
     progress: Callable[[str, int], None],
+    height: int | None = None,
 ) -> tuple[Path, str]:
     """Fetch the video into `target_dir`. Returns (path on disk, filename to serve)."""
     if kind not in KINDS:
         raise DownloadError(f"Unknown format: {kind}")
+    height = height or DEFAULT_HEIGHT
 
     target_dir.mkdir(parents=True, exist_ok=True)
     label = "video" if kind == "mp4" else "audio"
@@ -58,10 +60,13 @@ def prepare(
     }
 
     if kind == "mp4":
+        # Prefer mp4/m4a at or below the requested height, then any codec at
+        # that height, and only fall back to whatever exists if neither matches.
         opts["format"] = (
-            f"bv*[ext=mp4][height<={MAX_HEIGHT}]+ba[ext=m4a]/"
-            f"b[ext=mp4][height<={MAX_HEIGHT}]/"
-            f"bv*[height<={MAX_HEIGHT}]+ba/b"
+            f"bv*[ext=mp4][height<={height}]+ba[ext=m4a]/"
+            f"b[ext=mp4][height<={height}]/"
+            f"bv*[height<={height}]+ba/"
+            f"b[height<={height}]/b"
         )
         opts["merge_output_format"] = "mp4"
     else:

@@ -234,6 +234,14 @@ input, select { font: inherit; color: inherit; }
 .link.danger { color: var(--ink-soft); }
 .link:disabled { color: var(--ink-soft); text-decoration: none; cursor: progress; }
 .save-status { font-size: 12px; color: var(--ink-soft); font-family: var(--mono); }
+#resolution {
+  padding: 3px 6px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  margin-right: 4px;
+}
 
 /* ---------- word list ---------- */
 

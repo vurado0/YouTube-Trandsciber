@@ -94,6 +94,7 @@ class TranscribeRequest(BaseModel):
 class DownloadRequest(BaseModel):
     url: str
     kind: str = "mp4"
+    height: int | None = None
 
 
 # --- limits ----------------------------------------------------------------
@@ -196,7 +197,9 @@ def download(body: DownloadRequest, request: Request):
         return JSONResponse({"error": "Downloads are switched off on this server."}, status_code=403)
     if body.kind not in downloads.KINDS:
         return JSONResponse({"error": "Unknown format."}, status_code=400)
-    return _start(request, _run_download, body.url, body.kind)
+    if body.height is not None and not 100 <= body.height <= 4320:
+        return JSONResponse({"error": "Unsupported resolution."}, status_code=400)
+    return _start(request, _run_download, body.url, body.kind, body.height)
 
 
 @app.get("/api/job/{job_id}")
@@ -324,7 +327,7 @@ def _run_transcribe(job_id: str, url: str, lang: str, force_whisper: bool):
         _slots.release()
 
 
-def _run_download(job_id: str, url: str, kind: str):
+def _run_download(job_id: str, url: str, kind: str, height: int | None = None):
     if not _slots.acquire(timeout=120):
         _set(job_id, status="error", error="The server is busy. Try again in a minute.")
         return
@@ -335,12 +338,16 @@ def _run_download(job_id: str, url: str, kind: str):
                 f"That video is too long to download here (limit {MAX_DURATION // 60} minutes)."
             )
 
-        _set(job_id, stage=f"Preparing {downloads.KINDS[kind]}", percent=1)
+        label = downloads.KINDS[kind]
+        if kind == "mp4" and height:
+            label = f"{label} {height}p"
+        _set(job_id, stage=f"Preparing {label}", percent=1)
         path, filename = downloads.prepare(
             url,
             kind,
             FILES / job_id,
             lambda stage, percent: _set(job_id, stage=stage, percent=percent),
+            height=height if kind == "mp4" else None,
         )
         _set(
             job_id,

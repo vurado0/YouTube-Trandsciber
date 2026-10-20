@@ -103,6 +103,7 @@ def probe(url: str) -> dict:
 
     return {
         "id": info.get("id"),
+        "resolutions": _resolutions(info),
         "title": info.get("title") or "Untitled",
         "channel": info.get("uploader") or info.get("channel") or "",
         "duration": info.get("duration") or 0,
@@ -141,6 +142,20 @@ def fetch(url: str, lang: str, info: dict | None = None) -> dict:
 
 
 # --- internals -------------------------------------------------------------
+
+
+def _resolutions(info: dict) -> list[int]:
+    """Video heights this video actually offers, tallest first.
+
+    Offering a fixed menu would let someone pick 1080p on a video that only has
+    480p and quietly get something else.
+    """
+    heights = {
+        fmt["height"]
+        for fmt in info.get("formats") or []
+        if fmt.get("height") and fmt.get("vcodec", "none") != "none"
+    }
+    return sorted(heights, reverse=True)
 
 
 def _pick_track(tracks: dict, lang: str) -> dict | None:

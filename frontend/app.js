@@ -159,6 +159,7 @@ function openStudy(meta, result) {
 
   $("save-row").hidden = !state.caps.downloads;
   $("save-status").textContent = "";
+  renderResolutions(meta.resolutions || []);
 
   renderTranscript();
   renderWords();
@@ -593,9 +594,31 @@ function exportCsv() {
   download(`${state.video.id}-words.csv`, "Word,Reading,Sentence,Source\n" + rows.join("\n") + "\n");
 }
 
+function renderResolutions(heights) {
+  const select = $("resolution");
+  select.innerHTML = "";
+  // Only what this video actually offers, so a choice cannot silently not happen.
+  if (!heights.length) {
+    select.hidden = true;
+    return;
+  }
+  select.hidden = false;
+  heights.forEach((height) => {
+    const option = document.createElement("option");
+    option.value = height;
+    option.textContent = `${height}p`;
+    select.appendChild(option);
+  });
+  // Default to 720p when it exists: good enough to read subtitles burned into
+  // the picture, without a needlessly large file.
+  const preferred = heights.includes(720) ? 720 : heights[0];
+  select.value = preferred;
+}
+
 async function saveVideo(kind, button) {
   const buttons = document.querySelectorAll("[data-save]");
   buttons.forEach((item) => (item.disabled = true));
+  $("resolution").disabled = true;
   const status = $("save-status");
   status.textContent = "starting…";
 
@@ -603,6 +626,7 @@ async function saveVideo(kind, button) {
     const start = await post("/api/download", {
       url: `https://www.youtube.com/watch?v=${state.video.id}`,
       kind,
+      height: kind === "mp4" ? parseInt($("resolution").value, 10) || null : null,
     });
     if (start.error) throw new Error(start.error);
 
@@ -633,6 +657,7 @@ async function saveVideo(kind, button) {
     toast(error.message);
   } finally {
     buttons.forEach((item) => (item.disabled = false));
+    $("resolution").disabled = false;
   }
 }
 
