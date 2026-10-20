@@ -35,6 +35,8 @@ primary_region = "fra"
   min_machines_running = 0
 
 # Keeps cached transcripts and in-flight downloads across restarts.
+# One volume means one machine: deploy with --ha=false, or Fly will try to
+# create a second machine that has nothing to mount.
 [[mounts]]
   source = "transcript_data"
   destination = "/data"

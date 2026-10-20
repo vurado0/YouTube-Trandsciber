@@ -7,8 +7,9 @@ FROM python:3.12-slim
 ARG WITH_WHISPER=0
 
 # ffmpeg does the audio conversion for MP3 export and for Whisper.
+# gosu lets the entrypoint drop privileges after fixing volume ownership.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg \
+ && apt-get install -y --no-install-recommends ffmpeg gosu \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -20,10 +21,12 @@ RUN pip install --no-cache-dir -r requirements.txt \
 COPY backend/ backend/
 COPY frontend/ frontend/
 
-# Writable scratch space for cached transcripts and prepared downloads.
+# Writable scratch space for cached transcripts and prepared downloads. A
+# mounted volume replaces this directory, so the entrypoint fixes its ownership
+# at boot and then drops to `app`.
 ENV WORK_DIR=/data
 RUN mkdir -p /data && useradd -m -u 10001 app && chown -R app /data /app
-USER app
+COPY docker-entrypoint.sh /usr/local/bin/
 
 # Shared-instance defaults. Override per deployment.
 ENV PORT=8000 \
@@ -35,4 +38,5 @@ ENV PORT=8000 \
     MAX_DURATION_SECONDS=2700
 
 EXPOSE 8000
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["sh", "-c", "exec uvicorn app:app --app-dir backend --host 0.0.0.0 --port ${PORT}"]

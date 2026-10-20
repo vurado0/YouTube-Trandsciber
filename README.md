@@ -76,17 +76,39 @@ docker build -t transcript-study .
 docker run -p 8000:8000 -v transcript-data:/data transcript-study
 ```
 
-On Fly.io, edit the `app` name in `fly.toml`, then:
+### Fly.io
+
+App names are globally unique, so pick your own and keep `--ha=false` — the
+default creates two machines, which cannot share one volume.
 
 ```bash
-fly launch --copy-config
-fly volumes create transcript_data --size 3
+fly auth login
+fly launch --copy-config --no-deploy --ha=false --name your-unique-name
+fly volumes create transcript_data --size 1 --region fra --yes
 fly deploy
+fly open
 ```
 
-Add `--build-arg WITH_WHISPER=1` to the build (or set it in `fly.toml`) if you
-want offline transcription on the server. It adds ~300 MB to the image and needs
-a machine with real CPU and a few GB of RAM.
+`--no-deploy` on the first command lets you create the volume before the machine
+looks for it. Match `--region` to `primary_region` in `fly.toml`.
+
+**Costs, as of October 2026.** Fly has no free tier for new organisations. New
+accounts get a trial of 2 hours of machine runtime or 7 days, whichever runs out
+first, and no card is needed to start it; after that a card is required. A
+shared-cpu-1x/1 GB machine is $6.70 a month running continuously, but `fly.toml`
+sets `auto_stop_machines`, so it sleeps when idle and you pay only for the time
+it serves requests — a stopped machine is billed for its root filesystem at
+$0.15/GB/month, and the volume at $0.15/GB/month whether running or not. For
+light personal use expect well under a dollar a month; the 1.2 GB image makes
+the idle floor a few cents.
+
+For offline transcription on the server, set `WITH_WHISPER = "1"` in
+`fly.toml`'s `[build.args]` and give the machine more memory — 1 GB is not
+enough for the `small` model:
+
+```bash
+fly scale memory 2048
+```
 
 ### It does not work on Vercel
 
