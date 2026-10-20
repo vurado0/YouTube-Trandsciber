@@ -57,6 +57,7 @@ def download_audio(url: str, target_dir: Path, progress: Callable[[str, int], No
         "format": "bestaudio/best",
         "outtmpl": out_template,
         "progress_hooks": [hook],
+        **captions.ytdlp_auth(),
         "postprocessors": [
             {"key": "FFmpegExtractAudio", "preferredcodec": "wav", "preferredquality": "0"}
         ],

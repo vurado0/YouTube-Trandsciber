@@ -4,5 +4,19 @@ version = "1.0.0"
 description = "YouTube transcripts for language learning"
 requires-python = ">=3.12"
 
+# Vercel installs from here, not requirements.txt, when this file is present.
+# Deliberately excludes uvicorn (the platform provides the ASGI server) and
+# faster-whisper (cannot run in a function).
+#
+# ipadic (51 MB) rather than the unidic-lite (248 MB) used locally: the enforced
+# function bundle limit is 225 MB, and unidic alone takes the bundle to ~304 MB.
+# japanese.py picks whichever is installed, so furigana still works here.
+dependencies = [
+  "fastapi>=0.115",
+  "yt-dlp>=2025.1.1",
+  "fugashi>=1.3",
+  "ipadic>=1.0.0",
+]
+
 [tool.vercel]
 entrypoint = "main:app"

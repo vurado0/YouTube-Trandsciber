@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 import urllib.request
+from pathlib import Path
 
 import yt_dlp
 
@@ -18,6 +21,33 @@ _MAX_CHUNK_CHARS = 180
 
 class CaptionError(Exception):
     pass
+
+
+def ytdlp_auth() -> dict:
+    """Extra yt-dlp options for getting past YouTube's bot check.
+
+    YouTube refuses requests from datacenter IP ranges with "Sign in to confirm
+    you're not a bot", which is why a deployed instance fails where a laptop on
+    a home connection succeeds. Supplying cookies from a signed-in account is
+    the documented workaround; see the README for what you are accepting if you
+    do that. Nothing happens unless YTDLP_COOKIES is set.
+    """
+    cookies = os.environ.get("YTDLP_COOKIES", "").strip()
+    if not cookies:
+        return {}
+
+    path = Path(cookies)
+    if not path.is_file():
+        # Treat the value as the cookie file's contents (how you would pass it
+        # through an environment variable on a host with no writable project
+        # directory).
+        path = Path(tempfile.gettempdir()) / "yt-cookies.txt"
+        try:
+            path.write_text(cookies, "utf-8")
+        except OSError:
+            return {}
+
+    return {"cookiefile": str(path)}
 
 
 def video_id(url: str) -> str:
@@ -51,6 +81,7 @@ def probe(url: str) -> dict:
         "no_warnings": True,
         "skip_download": True,
         "noplaylist": True,
+        **ytdlp_auth(),
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
         try:

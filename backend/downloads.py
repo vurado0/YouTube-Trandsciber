@@ -54,6 +54,7 @@ def prepare(
         "progress_hooks": [hook],
         "restrictfilenames": False,
         "windowsfilenames": True,
+        **captions.ytdlp_auth(),
     }
 
     if kind == "mp4":

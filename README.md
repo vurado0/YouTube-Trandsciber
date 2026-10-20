@@ -100,11 +100,29 @@ files far past the few-MB response cap — and the obvious workaround, handing t
 browser YouTube's direct media URL, fails because those URLs are tied to the IP
 that requested them. Both keep working locally from the same codebase.
 
-**The real risk is not the code.** YouTube rate-limits and bot-blocks datacenter
-IP ranges, and Vercel runs on them. Expect "Sign in to confirm you're not a bot"
-to show up sooner or later. There is no fix for this from inside the app; it is
-a property of where the request comes from. Running locally never has this
-problem, because the request comes from your own connection.
+**YouTube blocks it, and this is confirmed, not theoretical.** A deployment to
+Vercel serves the app correctly but every caption request comes back with:
+
+> Sign in to confirm you're not a bot.
+
+YouTube refuses requests from datacenter IP ranges, and Vercel runs on them.
+Nothing in the app can fix this — it is a property of where the request comes
+from. The identical code on a laptop works every time, because the request
+comes from a home connection.
+
+Two ways round it, both with real costs:
+
+* **Cookies.** Set `YTDLP_COOKIES` to the contents of a Netscape-format cookie
+  file exported from a browser signed in to YouTube. Understand what that
+  means: anyone who can read your environment variables has a live session for
+  that Google account, YouTube may suspend an account it sees being automated,
+  and the cookies expire after a few weeks. Use a throwaway account, never your
+  main one.
+* **A residential proxy**, which costs money and is what the commercial
+  transcript services are quietly paying for.
+
+If neither appeals, run it locally — that path has no blocking problem at all,
+and is what this tool is really built for.
 
 ### Docker, for everything at once
 
@@ -148,6 +166,7 @@ shared-instance defaults; running locally everything is on.
 | `RATE_LIMIT_PER_HOUR` | 40 | Requests per IP per hour, 0 to disable |
 | `MAX_DURATION_SECONDS` | 0 / 2700 | Reject videos longer than this, 0 for no limit |
 | `TRUST_PROXY` | off / **on** | Read the client IP from the proxy header |
+| `YTDLP_COOKIES` | unset | Cookie file path, or its contents, to get past YouTube's bot check |
 | `WORK_DIR` | `./cache` | Where transcripts and prepared files live |
 | `PORT` | 8000 | Port to listen on |
 
