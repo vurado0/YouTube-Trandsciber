@@ -44,6 +44,10 @@
 
 * { box-sizing: border-box; }
 
+/* A class that sets `display` outranks the browser's own [hidden] rule, which
+   would otherwise leave .study and .exports visible when hidden is set. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--bg);

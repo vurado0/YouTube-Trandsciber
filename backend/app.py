@@ -10,6 +10,7 @@ environment switch, so a shared instance can run the cheap caption path only.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -20,7 +21,7 @@ from collections import deque
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -44,9 +45,14 @@ def number(name: str, default: int) -> int:
         return default
 
 
-ENABLE_WHISPER = flag("ENABLE_WHISPER", True) and whisper_asr.AVAILABLE
-ENABLE_DOWNLOADS = flag("ENABLE_DOWNLOADS", True)
-TRUST_PROXY = flag("TRUST_PROXY", False)
+# On a serverless platform (Vercel) a function is frozen the moment it returns,
+# so a job the browser polls for can never finish: transcription has to happen
+# inside the one request. Whisper and downloads cannot run there at all.
+SERVERLESS = flag("SERVERLESS", bool(os.environ.get("VERCEL")))
+
+ENABLE_WHISPER = flag("ENABLE_WHISPER", True) and whisper_asr.AVAILABLE and not SERVERLESS
+ENABLE_DOWNLOADS = flag("ENABLE_DOWNLOADS", True) and not SERVERLESS
+TRUST_PROXY = flag("TRUST_PROXY", False) or SERVERLESS
 
 MAX_CONCURRENT = number("MAX_CONCURRENT_JOBS", 2)
 RATE_LIMIT = number("RATE_LIMIT_PER_HOUR", 40)
@@ -56,11 +62,20 @@ FILE_TTL = number("FILE_TTL_SECONDS", 1800)
 # a three-hour video will tie the box up for a very long time.
 MAX_DURATION = number("MAX_DURATION_SECONDS", 0)
 
-WORK = Path(os.environ.get("WORK_DIR", ROOT / "cache"))
+# Serverless filesystems are read-only apart from /tmp, and that is per-instance
+# and short-lived — useful as a warm-instance cache, nothing more.
+_default_work = Path("/tmp/transcript-study") if SERVERLESS else ROOT / "cache"
+WORK = Path(os.environ.get("WORK_DIR", _default_work))
 CACHE = WORK / "transcripts"
 FILES = WORK / "files"
-CACHE.mkdir(parents=True, exist_ok=True)
-FILES.mkdir(parents=True, exist_ok=True)
+
+CACHING = True
+try:
+    CACHE.mkdir(parents=True, exist_ok=True)
+    FILES.mkdir(parents=True, exist_ok=True)
+except OSError:
+    # Read-only filesystem: run without caching rather than refusing to start.
+    CACHING = False
 
 app = FastAPI(title="Transcript Study")
 
@@ -143,6 +158,8 @@ def capabilities():
         "download_kinds": downloads.KINDS if ENABLE_DOWNLOADS else {},
         "languages": captions.SUPPORTED,
         "max_duration": MAX_DURATION,
+        "serverless": SERVERLESS,
+        "dictionary": japanese.DICTIONARY,
     }
 
 
@@ -157,7 +174,20 @@ def probe(request: TranscribeRequest):
 
 @app.post("/api/transcribe")
 def transcribe(body: TranscribeRequest, request: Request):
-    return _start(request, _run_transcribe, body.url, body.lang, body.force_whisper)
+    if not SERVERLESS:
+        return _start(request, _run_transcribe, body.url, body.lang, body.force_whisper)
+
+    # Serverless: do the work in this request and answer with the transcript
+    # itself. The browser recognises the shape and skips polling.
+    if rate_limited(request):
+        return JSONResponse(
+            {"error": "Too many requests from your address. Try again later."}, status_code=429
+        )
+    try:
+        meta, result = _transcribe(body.url, body.lang, body.force_whisper, lambda *_: None)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc) or exc.__class__.__name__}, status_code=400)
+    return {"status": "done", "percent": 100, "meta": meta, "result": result}
 
 
 @app.post("/api/download")
@@ -224,55 +254,70 @@ def _too_long(duration: int) -> bool:
     return bool(MAX_DURATION) and duration > MAX_DURATION
 
 
+def _transcribe(url: str, lang: str, force_whisper: bool, progress) -> tuple[dict, dict]:
+    """Fetch (or transcribe) one video. Shared by the job worker and the
+    synchronous serverless path."""
+    info = captions.probe(url)
+    meta = {key: value for key, value in info.items() if not key.startswith("_")}
+
+    chosen = _choose_language(lang, info)
+    if not chosen:
+        raise captions.CaptionError(
+            "Pick a language — this video has no English, German or Japanese captions "
+            "to auto-detect from."
+        )
+
+    progress(f"Fetching {captions.SUPPORTED[chosen]} captions", 5, meta)
+
+    cached = CACHE / f"{info['id']}.{chosen}{'.whisper' if force_whisper else ''}.json"
+    if CACHING and cached.exists():
+        return meta, json.loads(cached.read_text("utf-8"))
+
+    if not force_whisper and chosen in info["captions"]:
+        result = captions.fetch(url, chosen, info)
+    else:
+        if not ENABLE_WHISPER:
+            raise RuntimeError(
+                f"This video has no {captions.SUPPORTED[chosen]} captions, and offline "
+                "transcription is not available on this server."
+            )
+        if _too_long(info.get("duration") or 0):
+            raise RuntimeError(
+                f"That video is too long to transcribe here (limit {MAX_DURATION // 60} minutes)."
+            )
+        result = whisper_asr.transcribe(
+            url,
+            chosen,
+            info.get("duration") or 0,
+            lambda stage, percent: progress(stage, percent, None),
+        )
+
+    progress("Preparing the text", 99, None)
+    if chosen == "ja" and japanese.AVAILABLE:
+        japanese.annotate(result["segments"])
+
+    if CACHING:
+        try:
+            cached.write_text(json.dumps(result, ensure_ascii=False), "utf-8")
+        except OSError:
+            pass
+
+    return meta, result
+
+
 def _run_transcribe(job_id: str, url: str, lang: str, force_whisper: bool):
     if not _slots.acquire(timeout=120):
         _set(job_id, status="error", error="The server is busy. Try again in a minute.")
         return
     try:
-        info = captions.probe(url)
-        meta = {key: value for key, value in info.items() if not key.startswith("_")}
+        def progress(stage, percent, meta):
+            fields = {"stage": stage, "percent": percent}
+            if meta:
+                fields["meta"] = meta
+            _set(job_id, **fields)
 
-        chosen = _choose_language(lang, info)
-        if not chosen:
-            raise captions.CaptionError(
-                "Pick a language — this video has no English, German or Japanese captions "
-                "to auto-detect from."
-            )
-
-        _set(job_id, stage=f"Fetching {captions.SUPPORTED[chosen]} captions", percent=5, meta=meta)
-
-        cached = CACHE / f"{info['id']}.{chosen}{'.whisper' if force_whisper else ''}.json"
-        if cached.exists():
-            _finish(job_id, meta, json.loads(cached.read_text("utf-8")))
-            return
-
-        if not force_whisper and chosen in info["captions"]:
-            result = captions.fetch(url, chosen, info)
-        else:
-            if not ENABLE_WHISPER:
-                raise RuntimeError(
-                    f"This video has no {captions.SUPPORTED[chosen]} captions, and offline "
-                    "transcription is switched off on this server."
-                )
-            if _too_long(info.get("duration") or 0):
-                raise RuntimeError(
-                    f"That video is too long to transcribe here (limit "
-                    f"{MAX_DURATION // 60} minutes)."
-                )
-            result = whisper_asr.transcribe(
-                url,
-                chosen,
-                info.get("duration") or 0,
-                lambda stage, percent: _set(job_id, stage=stage, percent=percent),
-            )
-
-        _set(job_id, stage="Preparing the text", percent=99)
-        if chosen == "ja" and japanese.AVAILABLE:
-            japanese.annotate(result["segments"])
-
-        cached.write_text(json.dumps(result, ensure_ascii=False), "utf-8")
+        meta, result = _transcribe(url, lang, force_whisper, progress)
         _finish(job_id, meta, result)
-
     except Exception as exc:
         _set(job_id, status="error", error=str(exc) or exc.__class__.__name__)
     finally:
@@ -333,9 +378,30 @@ def _choose_language(lang: str, info: dict) -> str | None:
 # --- static ----------------------------------------------------------------
 
 
+def _asset_version() -> str:
+    """Short fingerprint of the frontend assets, used to bust caches.
+
+    Without it a browser (or a CDN) keeps serving the previous app.js and
+    style.css after a redeploy, which is how a fixed bug appears not to be.
+    """
+    digest = hashlib.sha256()
+    for name in ("app.js", "style.css"):
+        try:
+            digest.update((FRONTEND / name).read_bytes())
+        except OSError:
+            pass
+    return digest.hexdigest()[:10]
+
+
+ASSET_VERSION = _asset_version()
+
+
 @app.get("/")
 def index():
-    return FileResponse(FRONTEND / "index.html")
+    html = (FRONTEND / "index.html").read_text("utf-8")
+    html = html.replace("/style.css", f"/style.css?v={ASSET_VERSION}")
+    html = html.replace("/app.js", f"/app.js?v={ASSET_VERSION}")
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 app.mount("/", StaticFiles(directory=FRONTEND), name="static")

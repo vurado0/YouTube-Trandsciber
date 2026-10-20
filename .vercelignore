@@ -1,0 +1,9 @@
+.venv/
+cache/
+docs/
+Dockerfile
+docker-entrypoint.sh
+fly.toml
+requirements-whisper.txt
+__pycache__/
+*.pyc

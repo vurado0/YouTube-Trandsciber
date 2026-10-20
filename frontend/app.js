@@ -103,7 +103,13 @@ async function onSubmit(event) {
   try {
     const start = await post("/api/transcribe", { url, lang: $("lang").value });
     if (start.error) throw new Error(start.error);
-    await poll(start.job);
+
+    if (start.result) {
+      // Serverless: the transcript came back with the request, nothing to poll.
+      openStudy(start.meta, start.result);
+    } else {
+      await poll(start.job);
+    }
   } catch (error) {
     fail(error.message);
   } finally {

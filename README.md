@@ -68,73 +68,80 @@ To use a different port: `PORT=9000 ./run.sh`.
 
 ## Deploying it
 
-This needs a **persistent container host** — Fly.io, Railway, Render, or any box
-that can run Docker.
+What you get depends on where you put it:
+
+| | Local | Vercel | Docker host |
+| --- | --- | --- | --- |
+| Captions (en/de/ja) | yes | yes | yes |
+| Furigana | yes | yes | yes |
+| Word list, exports | yes | yes | yes |
+| Offline Whisper | yes | **no** | optional |
+| MP4 / MP3 download | yes | **no** | optional |
+
+### Vercel
+
+The app detects Vercel and switches to a single-request mode: the transcript is
+fetched and returned inside the one HTTP request, because a serverless function
+is frozen as soon as it responds and could never finish a job the browser polls
+for. A 24-minute Japanese video, tokenised and with furigana, takes about 1.7
+seconds and comes back as roughly 430 KB.
+
+```bash
+vercel          # preview deployment
+vercel --prod   # production
+```
+
+`pyproject.toml` points Vercel at `main:app`, and `vercel.json` sets
+`SERVERLESS=1` and a 60-second function limit. Nothing else to configure.
+
+**What does not work there, and why.** Whisper needs an ffmpeg binary, a ~500 MB
+model and minutes of CPU, against a 60-second function. Downloads need to stream
+files far past the few-MB response cap — and the obvious workaround, handing the
+browser YouTube's direct media URL, fails because those URLs are tied to the IP
+that requested them. Both keep working locally from the same codebase.
+
+**The real risk is not the code.** YouTube rate-limits and bot-blocks datacenter
+IP ranges, and Vercel runs on them. Expect "Sign in to confirm you're not a bot"
+to show up sooner or later. There is no fix for this from inside the app; it is
+a property of where the request comes from. Running locally never has this
+problem, because the request comes from your own connection.
+
+### Docker, for everything at once
+
+A persistent container keeps every feature, Whisper and downloads included.
 
 ```bash
 docker build -t transcript-study .
 docker run -p 8000:8000 -v transcript-data:/data transcript-study
 ```
 
-### Fly.io
-
-App names are globally unique, so pick your own and keep `--ha=false` — the
-default creates two machines, which cannot share one volume.
+On Fly.io, edit the `app` name in `fly.toml`, then:
 
 ```bash
 fly auth login
 fly launch --copy-config --no-deploy --ha=false --name your-unique-name
 fly volumes create transcript_data --size 1 --region fra --yes
 fly deploy
-fly open
 ```
 
-`--no-deploy` on the first command lets you create the volume before the machine
-looks for it. Match `--region` to `primary_region` in `fly.toml`.
+`--ha=false` matters: the default creates two machines, and two machines cannot
+share one volume. Note that Fly has **no free tier** for new organisations as of
+October 2026 — a trial of 2 hours of machine runtime or 7 days, then a card is
+required. With `auto_stop_machines` the instance sleeps when idle, so light use
+costs well under a dollar a month, but it is not free.
 
-**Costs, as of October 2026.** Fly has no free tier for new organisations. New
-accounts get a trial of 2 hours of machine runtime or 7 days, whichever runs out
-first, and no card is needed to start it; after that a card is required. A
-shared-cpu-1x/1 GB machine is $6.70 a month running continuously, but `fly.toml`
-sets `auto_stop_machines`, so it sleeps when idle and you pay only for the time
-it serves requests — a stopped machine is billed for its root filesystem at
-$0.15/GB/month, and the volume at $0.15/GB/month whether running or not. For
-light personal use expect well under a dollar a month; the 1.2 GB image makes
-the idle floor a few cents.
-
-For offline transcription on the server, set `WITH_WHISPER = "1"` in
-`fly.toml`'s `[build.args]` and give the machine more memory — 1 GB is not
-enough for the `small` model:
-
-```bash
-fly scale memory 2048
-```
-
-### It does not work on Vercel
-
-Serverless is the wrong shape for this, and the entrypoint error you get first is
-the least of it:
-
-* Transcription runs as a background job that the browser polls. Serverless
-  functions are frozen the moment they return a response, and the next poll can
-  land on a different instance, so the job never finishes.
-* `unidic-lite`, the Japanese dictionary, is 248 MB on its own — the function
-  size limit is 250 MB.
-* Whisper needs an ffmpeg binary, a ~500 MB model and minutes of CPU, against a
-  timeout measured in seconds.
-* YouTube rate-limits and bot-blocks datacenter IPs, which breaks even the
-  lightweight caption path.
-
-That last point applies to *any* host, not just Vercel. Expect a deployed
-instance to hit "Sign in to confirm you're not a bot" sooner or later.
+For Whisper on the server set `WITH_WHISPER = "1"` in `fly.toml`'s
+`[build.args]` and run `fly scale memory 2048` — 1 GB is not enough for the
+`small` model.
 
 ### Configuration
 
-All of these are environment variables. The defaults in `Dockerfile` and
-`fly.toml` are tuned for a shared instance; running locally everything is on.
+All of these are environment variables. Vercel and the container set
+shared-instance defaults; running locally everything is on.
 
-| Variable | Default (local / container) | What it does |
+| Variable | Default (local / deployed) | What it does |
 | --- | --- | --- |
+| `SERVERLESS` | off / **on** (auto on Vercel) | One-request mode, no job polling |
 | `ENABLE_WHISPER` | on / **off** | Offline transcription for caption-less videos |
 | `ENABLE_DOWNLOADS` | on / **off** | The MP4 and MP3 buttons |
 | `MAX_CONCURRENT_JOBS` | 2 | Jobs running at once; the rest queue |
@@ -144,11 +151,15 @@ All of these are environment variables. The defaults in `Dockerfile` and
 | `WORK_DIR` | `./cache` | Where transcripts and prepared files live |
 | `PORT` | 8000 | Port to listen on |
 
-**Downloads are off by default in the container on purpose.** A publicly
-reachable YouTube downloader will likely breach your host's terms of service,
-and it gets the instance IP-blocked by YouTube much faster than caption fetching
-does. Set `ENABLE_DOWNLOADS=1` if you accept that. The app has no login, so
-anyone with the URL can use whatever you switch on.
+**Downloads are off by default once deployed, on purpose.** A publicly reachable
+YouTube downloader will likely breach your host's terms of service, and it gets
+the instance IP-blocked by YouTube much faster than caption fetching does. The
+app has no login, so anyone with the URL can use whatever you switch on.
+
+Japanese needs a MeCab dictionary. `unidic-lite` (248 MB, better readings) is
+used when present; `ipadic` (51 MB) works as a smaller substitute and gives
+better dictionary forms for verbs. The whole Vercel bundle with unidic-lite is
+about 301 MB, inside the 500 MB function limit.
 
 ## How a video gets transcribed
 
@@ -182,6 +193,9 @@ frontend/
   index.html      the whole UI
   app.js          player sync, word list, exports, downloads
   style.css       light and dark themes
+main.py           entrypoint for serverless (Vercel) imports
+pyproject.toml    Vercel entrypoint config
+vercel.json       Vercel function settings
 Dockerfile        container image for a persistent host
 fly.toml          Fly.io deployment config
 ```

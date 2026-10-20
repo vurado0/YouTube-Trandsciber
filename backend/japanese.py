@@ -1,24 +1,53 @@
-"""Japanese word segmentation and furigana. Optional: degrades to plain text."""
+"""Japanese word segmentation and furigana. Optional: degrades to plain text.
+
+Two dictionaries are supported. unidic-lite gives the better readings and is
+what a local install uses. It is 248 MB, which does not fit inside a serverless
+function, so ipadic (51 MB) is used instead when unidic is absent.
+"""
 
 from __future__ import annotations
 
 import re
 
-try:
-    import fugashi
+_TAGGER = None
+DICTIONARY = None
 
-    _TAGGER = fugashi.Tagger()
-except Exception:  # pragma: no cover - optional dependency
-    _TAGGER = None
 
+def _setup():
+    """Pick whichever dictionary is installed, best first."""
+    global _TAGGER, DICTIONARY
+    try:
+        import fugashi
+    except Exception:  # pragma: no cover - optional dependency
+        return
+
+    try:
+        import unidic_lite  # noqa: F401
+
+        _TAGGER = fugashi.Tagger()
+        DICTIONARY = "unidic"
+        return
+    except Exception:
+        pass
+
+    try:
+        import ipadic
+
+        _TAGGER = fugashi.GenericTagger(ipadic.MECAB_ARGS)
+        DICTIONARY = "ipadic"
+    except Exception:
+        pass
+
+
+_setup()
 AVAILABLE = _TAGGER is not None
 
 _KANJI = re.compile(r"[一-鿿々]")
 _KANA_ONLY = re.compile(r"^[぀-ゟ゠-ヿー]+$")
-_PUNCT = "補助記号"
 
-# Parts of speech not worth offering as vocabulary.
-_SKIP_POS = {"助詞", "助動詞", "補助記号", "空白"}
+# Parts of speech not worth offering as vocabulary. Both dictionaries' tags:
+# unidic marks punctuation 補助記号, ipadic marks it 記号.
+_SKIP_POS = {"助詞", "助動詞", "補助記号", "記号", "空白", "フィラー"}
 
 
 def katakana_to_hiragana(text: str) -> str:
@@ -32,31 +61,39 @@ def katakana_to_hiragana(text: str) -> str:
     return "".join(out)
 
 
-def tokenize(text: str) -> list[dict]:
-    """Split Japanese text into tokens with readings and furigana ruby parts.
+def _read(word) -> tuple[str, str, str]:
+    """(part of speech, dictionary form, katakana reading) for either dictionary."""
+    feature = word.feature
+    if DICTIONARY == "unidic":
+        return (
+            getattr(feature, "pos1", "") or "",
+            getattr(feature, "lemma", None) or word.surface,
+            getattr(feature, "kana", None) or getattr(feature, "pron", None) or "",
+        )
 
-    Each token: {s: surface, r: reading (hiragana), b: dictionary form,
-                 p: part of speech, v: is it vocabulary-worthy,
-                 ruby: [[base, furigana|None], ...]}
-    """
+    # ipadic: pos1, pos2, pos3, pos4, conj type, conj form, base, reading, pron
+    fields = list(feature)
+    get = lambda index: (fields[index] if len(fields) > index and fields[index] != "*" else "")
+    return get(0), get(6) or word.surface, get(7)
+
+
+def tokenize(text: str) -> list[dict]:
+    """Split Japanese text into tokens with readings and furigana ruby parts."""
     if not AVAILABLE or not text.strip():
         return [{"s": text, "r": "", "b": "", "p": "", "v": False, "ruby": [[text, None]]}]
 
     tokens = []
     for word in _TAGGER(text):
         surface = word.surface
-        feature = word.feature
-        kana = getattr(feature, "kana", None) or getattr(feature, "pron", None) or ""
+        pos, lemma, kana = _read(word)
         reading = katakana_to_hiragana(kana) if kana else ""
-        lemma = getattr(feature, "lemma", None) or surface
-        pos = getattr(feature, "pos1", None) or ""
         tokens.append(
             {
                 "s": surface,
                 "r": reading,
                 "b": (lemma or surface).split("-")[0],
                 "p": pos,
-                "v": pos not in _SKIP_POS and not _PUNCT in pos and bool(surface.strip()),
+                "v": pos not in _SKIP_POS and bool(surface.strip()),
                 "ruby": furigana(surface, reading),
             }
         )
@@ -75,7 +112,6 @@ def furigana(surface: str, reading: str) -> list[list]:
 
     hira_surface = katakana_to_hiragana(surface)
 
-    # Trim kana that match at both ends; whatever is left is the kanji core.
     head = 0
     while (
         head < len(surface)

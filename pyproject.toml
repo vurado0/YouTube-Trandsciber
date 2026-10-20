@@ -1,0 +1,8 @@
+[project]
+name = "transcript-study"
+version = "1.0.0"
+description = "YouTube transcripts for language learning"
+requires-python = ">=3.12"
+
+[tool.vercel]
+entrypoint = "main:app"
