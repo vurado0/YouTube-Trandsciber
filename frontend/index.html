@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transcript Study</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗣️</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">⏯</span>
+    <span class="brand-name">Transcript Study</span>
+  </div>
+
+  <form id="load-form" class="loader">
+    <input id="url" type="text" inputmode="url" spellcheck="false"
+           placeholder="Paste a YouTube link…" autocomplete="off">
+    <select id="lang" title="Spoken language of the video">
+      <option value="auto">Auto-detect</option>
+      <option value="en">English</option>
+      <option value="de">Deutsch</option>
+      <option value="ja">日本語</option>
+    </select>
+    <button id="go" type="submit">Transcribe</button>
+  </form>
+
+  <button id="theme-toggle" class="icon-btn" title="Toggle light/dark">◐</button>
+</header>
+
+<main id="main">
+
+  <!-- Landing -->
+  <section id="welcome" class="welcome">
+    <h1>Turn any YouTube video into a study transcript.</h1>
+    <p class="sub">
+      Paste a link in English, German or Japanese. You get a time-synced transcript you can
+      click through, loop line by line, and mine for vocabulary.
+    </p>
+    <ul class="features">
+      <li><b>Click any line</b> to jump the video there.</li>
+      <li><b>Loop a line</b> until you can hear every word.</li>
+      <li><b>Click a word</b> to save it, with its sentence, to your word list.</li>
+      <li><b>Japanese gets furigana</b> and real word boundaries.</li>
+      <li><b>Export</b> to TXT, SRT, or an Anki-ready CSV.</li>
+    </ul>
+    <div id="recents" class="recents" hidden>
+      <h2>Recently studied</h2>
+      <div id="recents-list" class="recents-list"></div>
+    </div>
+    <p id="capability-note" class="capability-note"></p>
+  </section>
+
+  <!-- Loading -->
+  <section id="progress" class="progress" hidden>
+    <div class="spinner"></div>
+    <p id="progress-stage">Looking up the video…</p>
+    <div class="bar"><div id="progress-bar" class="bar-fill"></div></div>
+    <p class="progress-hint" id="progress-hint"></p>
+  </section>
+
+  <!-- Error -->
+  <section id="error" class="error" hidden>
+    <h2>That did not work</h2>
+    <p id="error-text"></p>
+    <button id="error-retry" class="ghost">Try another video</button>
+  </section>
+
+  <!-- Study view -->
+  <section id="study" class="study" hidden>
+    <div class="stage">
+      <div class="player-wrap"><div id="player"></div></div>
+
+      <div class="meta">
+        <h2 id="video-title"></h2>
+        <p id="video-sub"></p>
+      </div>
+
+      <div class="controls">
+        <div class="control-row">
+          <button id="btn-play" class="pill primary" title="Space">▶ Play</button>
+          <button id="btn-prev" class="pill" title="←">⟵ Line</button>
+          <button id="btn-next" class="pill" title="→">Line ⟶</button>
+          <button id="btn-loop" class="pill toggle" title="R">↻ Loop line</button>
+        </div>
+        <div class="control-row">
+          <label class="field">
+            <span>Speed</span>
+            <select id="speed">
+              <option value="0.5">0.5×</option>
+              <option value="0.75">0.75×</option>
+              <option value="1" selected>1×</option>
+              <option value="1.25">1.25×</option>
+              <option value="1.5">1.5×</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="opt-follow" checked><span>Follow along</span></label>
+          <label class="check"><input type="checkbox" id="opt-blur"><span>Hide text</span></label>
+          <label class="check" id="furigana-field"><input type="checkbox" id="opt-furigana" checked><span>Furigana</span></label>
+        </div>
+      </div>
+
+      <div class="exports">
+        <span>Export</span>
+        <button class="link" data-export="txt">Text</button>
+        <button class="link" data-export="srt">SRT</button>
+        <button class="link" data-export="md">Markdown</button>
+      </div>
+
+      <div class="wordlist">
+        <div class="wordlist-head">
+          <h3>Word list <span id="word-count" class="count">0</span></h3>
+          <div>
+            <button class="link" id="export-csv">Anki CSV</button>
+            <button class="link danger" id="clear-words">Clear</button>
+          </div>
+        </div>
+        <div id="words" class="words"></div>
+        <p class="wordlist-hint">Click a word in the transcript to save it here.</p>
+      </div>
+    </div>
+
+    <div class="transcript-pane">
+      <div class="transcript-head">
+        <input id="search" type="search" placeholder="Search the transcript…" autocomplete="off">
+        <span id="source-badge" class="badge"></span>
+      </div>
+      <div id="transcript" class="transcript"></div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

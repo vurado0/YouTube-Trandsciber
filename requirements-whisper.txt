@@ -1,0 +1,3 @@
+# Offline speech-to-text for videos that have no captions.
+faster-whisper>=1.1
+numpy>=1.26
