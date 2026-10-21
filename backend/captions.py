@@ -87,7 +87,7 @@ def probe(url: str) -> dict:
         try:
             info = ydl.extract_info(canonical_url(url), download=False)
         except yt_dlp.utils.DownloadError as exc:
-            raise CaptionError(f"YouTube rejected that link: {_clean(str(exc))}") from exc
+            raise CaptionError(_clean(str(exc))) from exc
 
     manual = info.get("subtitles") or {}
     auto = info.get("automatic_captions") or {}
@@ -267,4 +267,4 @@ def _clean(message: str) -> str:
             "machine works normally."
         )
 
-    return message.split("\n")[0][:300]
+    return f"YouTube rejected that link: {message.splitlines()[0][:260]}"
