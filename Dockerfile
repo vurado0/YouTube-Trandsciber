@@ -6,7 +6,7 @@ FROM python:3.12-slim
 
 ARG WITH_WHISPER=0
 
-# ffmpeg does the audio conversion for MP3 export and for Whisper.
+# ffmpeg converts the audio for Whisper.
 # gosu lets the entrypoint drop privileges after fixing volume ownership.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg gosu \
@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
 COPY backend/ backend/
 COPY frontend/ frontend/
 
-# Writable scratch space for cached transcripts and prepared downloads. A
+# Writable scratch space for cached transcripts. A
 # mounted volume replaces this directory, so the entrypoint fixes its ownership
 # at boot and then drops to `app`.
 ENV WORK_DIR=/data
@@ -32,7 +32,6 @@ COPY docker-entrypoint.sh /usr/local/bin/
 ENV PORT=8000 \
     TRUST_PROXY=1 \
     ENABLE_WHISPER=0 \
-    ENABLE_DOWNLOADS=0 \
     MAX_CONCURRENT_JOBS=2 \
     RATE_LIMIT_PER_HOUR=40 \
     MAX_DURATION_SECONDS=2700

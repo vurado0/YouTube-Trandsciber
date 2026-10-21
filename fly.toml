@@ -17,11 +17,6 @@ primary_region = "fra"
   # on a shared instance it will tie the box up for minutes per video.
   ENABLE_WHISPER = "0"
 
-  # MP4/MP3 downloads. Off by default on purpose: a publicly reachable YouTube
-  # downloader is likely to breach your host's terms of service, and it gets the
-  # instance IP-blocked by YouTube far faster than caption fetching does.
-  # Set to "1" if you accept that.
-  ENABLE_DOWNLOADS = "0"
 
   MAX_CONCURRENT_JOBS = "2"
   RATE_LIMIT_PER_HOUR = "40"
@@ -34,7 +29,7 @@ primary_region = "fra"
   auto_start_machines = true
   min_machines_running = 0
 
-# Keeps cached transcripts and in-flight downloads across restarts.
+# Keeps cached transcripts across restarts.
 # One volume means one machine: deploy with --ha=false, or Fly will try to
 # create a second machine that has nothing to mount.
 [[mounts]]

@@ -1,11 +1,10 @@
 """YouTube transcript study tool.
 
 Captions come from YouTube when the video has them; otherwise the audio is
-transcribed offline with Whisper. Japanese transcripts get furigana. Videos can
-also be saved as MP4 or MP3.
+transcribed offline with Whisper. Japanese transcripts get furigana.
 
-Everything that costs real resources — Whisper, downloads — is behind an
-environment switch, so a shared instance can run the cheap caption path only.
+Whisper is behind an environment switch, so a shared instance can run the cheap
+caption path only.
 """
 
 from __future__ import annotations
@@ -13,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import threading
 import time
 import uuid
@@ -26,7 +24,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import captions
-import downloads
 import japanese
 import whisper_asr
 
@@ -47,19 +44,17 @@ def number(name: str, default: int) -> int:
 
 # On a serverless platform (Vercel) a function is frozen the moment it returns,
 # so a job the browser polls for can never finish: transcription has to happen
-# inside the one request. Whisper and downloads cannot run there at all.
+# inside the one request. Whisper cannot run there at all.
 SERVERLESS = flag("SERVERLESS", bool(os.environ.get("VERCEL")))
 
 ENABLE_WHISPER = flag("ENABLE_WHISPER", True) and whisper_asr.AVAILABLE and not SERVERLESS
-ENABLE_DOWNLOADS = flag("ENABLE_DOWNLOADS", True) and not SERVERLESS
 TRUST_PROXY = flag("TRUST_PROXY", False) or SERVERLESS
 
 MAX_CONCURRENT = number("MAX_CONCURRENT_JOBS", 2)
 RATE_LIMIT = number("RATE_LIMIT_PER_HOUR", 40)
 JOB_TTL = number("JOB_TTL_SECONDS", 3600)
-FILE_TTL = number("FILE_TTL_SECONDS", 1800)
-# 0 means no limit. A shared instance should cap this; Whisper and downloads on
-# a three-hour video will tie the box up for a very long time.
+# 0 means no limit. A shared instance should cap this; Whisper on a three-hour
+# video will tie the box up for a very long time.
 MAX_DURATION = number("MAX_DURATION_SECONDS", 0)
 
 # Serverless filesystems are read-only apart from /tmp, and that is per-instance
@@ -67,12 +62,10 @@ MAX_DURATION = number("MAX_DURATION_SECONDS", 0)
 _default_work = Path("/tmp/transcript-study") if SERVERLESS else ROOT / "cache"
 WORK = Path(os.environ.get("WORK_DIR", _default_work))
 CACHE = WORK / "transcripts"
-FILES = WORK / "files"
 
 CACHING = True
 try:
     CACHE.mkdir(parents=True, exist_ok=True)
-    FILES.mkdir(parents=True, exist_ok=True)
 except OSError:
     # Read-only filesystem: run without caching rather than refusing to start.
     CACHING = False
@@ -89,12 +82,6 @@ class TranscribeRequest(BaseModel):
     url: str
     lang: str = "auto"
     force_whisper: bool = False
-
-
-class DownloadRequest(BaseModel):
-    url: str
-    kind: str = "mp4"
-    height: int | None = None
 
 
 # --- limits ----------------------------------------------------------------
@@ -127,7 +114,7 @@ def rate_limited(request: Request) -> bool:
 
 
 def sweep():
-    """Drop finished jobs and their files once they are past their TTL."""
+    """Drop finished jobs once they are past their TTL."""
     now = time.time()
     with _lock:
         expired = [
@@ -138,12 +125,6 @@ def sweep():
         for job_id in expired:
             _jobs.pop(job_id, None)
 
-    for folder in FILES.iterdir() if FILES.exists() else []:
-        try:
-            if now - folder.stat().st_mtime > FILE_TTL:
-                shutil.rmtree(folder, ignore_errors=True)
-        except OSError:
-            pass
 
 
 # --- endpoints -------------------------------------------------------------
@@ -155,8 +136,6 @@ def capabilities():
         "whisper": ENABLE_WHISPER,
         "whisper_model": whisper_asr.MODEL_SIZE,
         "furigana": japanese.AVAILABLE,
-        "downloads": ENABLE_DOWNLOADS,
-        "download_kinds": downloads.KINDS if ENABLE_DOWNLOADS else {},
         "languages": captions.SUPPORTED,
         "max_duration": MAX_DURATION,
         "serverless": SERVERLESS,
@@ -191,16 +170,6 @@ def transcribe(body: TranscribeRequest, request: Request):
     return {"status": "done", "percent": 100, "meta": meta, "result": result}
 
 
-@app.post("/api/download")
-def download(body: DownloadRequest, request: Request):
-    if not ENABLE_DOWNLOADS:
-        return JSONResponse({"error": "Downloads are switched off on this server."}, status_code=403)
-    if body.kind not in downloads.KINDS:
-        return JSONResponse({"error": "Unknown format."}, status_code=400)
-    if body.height is not None and not 100 <= body.height <= 4320:
-        return JSONResponse({"error": "Unsupported resolution."}, status_code=400)
-    return _start(request, _run_download, body.url, body.kind, body.height)
-
 
 @app.get("/api/job/{job_id}")
 def job(job_id: str):
@@ -210,19 +179,6 @@ def job(job_id: str):
         return JSONResponse({"error": "Unknown job — it may have expired."}, status_code=404)
     return {key: value for key, value in state.items() if not key.startswith("_")}
 
-
-@app.get("/api/file/{job_id}")
-def file(job_id: str):
-    with _lock:
-        state = _jobs.get(job_id)
-    if not state or state.get("status") != "done" or "_path" not in state:
-        return JSONResponse({"error": "Nothing to download for that job."}, status_code=404)
-
-    path = Path(state["_path"])
-    if not path.is_file():
-        return JSONResponse({"error": "That file has already been cleaned up."}, status_code=410)
-
-    return FileResponse(path, filename=state["filename"], media_type="application/octet-stream")
 
 
 # --- worker ----------------------------------------------------------------
@@ -326,44 +282,6 @@ def _run_transcribe(job_id: str, url: str, lang: str, force_whisper: bool):
     finally:
         _slots.release()
 
-
-def _run_download(job_id: str, url: str, kind: str, height: int | None = None):
-    if not _slots.acquire(timeout=120):
-        _set(job_id, status="error", error="The server is busy. Try again in a minute.")
-        return
-    try:
-        info = captions.probe(url)
-        if _too_long(info.get("duration") or 0):
-            raise downloads.DownloadError(
-                f"That video is too long to download here (limit {MAX_DURATION // 60} minutes)."
-            )
-
-        label = downloads.KINDS[kind]
-        if kind == "mp4" and height:
-            label = f"{label} {height}p"
-        _set(job_id, stage=f"Preparing {label}", percent=1)
-        path, filename = downloads.prepare(
-            url,
-            kind,
-            FILES / job_id,
-            lambda stage, percent: _set(job_id, stage=stage, percent=percent),
-            height=height if kind == "mp4" else None,
-        )
-        _set(
-            job_id,
-            status="done",
-            stage="Ready",
-            percent=100,
-            filename=filename,
-            size=path.stat().st_size,
-            kind=kind,
-            _path=str(path),
-        )
-    except Exception as exc:
-        shutil.rmtree(FILES / job_id, ignore_errors=True)
-        _set(job_id, status="error", error=str(exc) or exc.__class__.__name__)
-    finally:
-        _slots.release()
 
 
 def _finish(job_id: str, meta: dict, result: dict):

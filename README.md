@@ -25,9 +25,6 @@ The only thing that leaves your laptop is the request to YouTube.
   when you want to test yourself.
 * **Hide-the-text mode** for pure listening practice: the transcript blurs out and
   only the line currently being spoken stays readable.
-* **Saves the video** as MP4 at whatever resolution you pick, or just the audio
-  as MP3, for studying offline. The menu lists only the resolutions that
-  video actually has.
 
 ## Setup
 
@@ -78,7 +75,6 @@ What you get depends on where you put it:
 | Furigana | yes | yes | yes |
 | Word list, exports | yes | yes | yes |
 | Offline Whisper | yes | **no** | optional |
-| MP4 / MP3 download | yes | **no** | optional |
 
 ### Vercel
 
@@ -96,11 +92,9 @@ vercel --prod   # production
 `pyproject.toml` points Vercel at `main:app`, and `vercel.json` sets
 `SERVERLESS=1` and a 60-second function limit. Nothing else to configure.
 
-**What does not work there, and why.** Whisper needs an ffmpeg binary, a ~500 MB
-model and minutes of CPU, against a 60-second function. Downloads need to stream
-files far past the few-MB response cap — and the obvious workaround, handing the
-browser YouTube's direct media URL, fails because those URLs are tied to the IP
-that requested them. Both keep working locally from the same codebase.
+**What does not work there.** Whisper needs an ffmpeg binary, a ~500 MB model
+and minutes of CPU, against a 60-second function. It keeps working locally from
+the same codebase.
 
 **YouTube blocks it, and this is confirmed, not theoretical.** A deployment to
 Vercel serves the app correctly but every caption request comes back with:
@@ -140,11 +134,11 @@ brew install cloudflared
 
 It starts the server if it is not already running, opens the tunnel, and prints
 a `https://….trycloudflare.com` address. Open that on your phone. Ctrl-C stops
-sharing. Everything works over it — Whisper, MP4/MP3, furigana.
+sharing. Everything works over it — Whisper, furigana, exports.
 
 Two things to know. The address is public to anyone who has it, and the app has
 no login, so whoever opens it can run transcriptions on your laptop and
-download through your connection; it is unguessable, but do not post it
+transcribe through your connection; it is unguessable, but do not post it
 anywhere. And it is **a new address every run** — quick tunnels cannot keep
 theirs, and a stopped one is gone for good.
 
@@ -176,7 +170,7 @@ cloudflared as a service with `cloudflared service install`.
 
 ### Docker, for everything at once
 
-A persistent container keeps every feature, Whisper and downloads included.
+A persistent container keeps every feature, Whisper included.
 
 ```bash
 docker build -t transcript-study .
@@ -211,7 +205,6 @@ shared-instance defaults; running locally everything is on.
 | --- | --- | --- |
 | `SERVERLESS` | off / **on** (auto on Vercel) | One-request mode, no job polling |
 | `ENABLE_WHISPER` | on / **off** | Offline transcription for caption-less videos |
-| `ENABLE_DOWNLOADS` | on / **off** | The MP4 and MP3 buttons |
 | `MAX_CONCURRENT_JOBS` | 2 | Jobs running at once; the rest queue |
 | `RATE_LIMIT_PER_HOUR` | 40 | Requests per IP per hour, 0 to disable |
 | `MAX_DURATION_SECONDS` | 0 / 2700 | Reject videos longer than this, 0 for no limit |
@@ -220,10 +213,7 @@ shared-instance defaults; running locally everything is on.
 | `WORK_DIR` | `./cache` | Where transcripts and prepared files live |
 | `PORT` | 8000 | Port to listen on |
 
-**Downloads are off by default once deployed, on purpose.** A publicly reachable
-YouTube downloader will likely breach your host's terms of service, and it gets
-the instance IP-blocked by YouTube much faster than caption fetching does. The
-app has no login, so anyone with the URL can use whatever you switch on.
+The app has no login, so anyone with the URL can use whatever you switch on.
 
 Japanese needs a MeCab dictionary. `unidic-lite` (248 MB, better readings) is
 used when present; `ipadic` (51 MB) works as a smaller substitute and gives
@@ -256,11 +246,10 @@ backend/
   app.py          FastAPI server, job queue, limits, caching
   captions.py     yt-dlp caption fetching, json3 parsing, sentence chunking
   whisper_asr.py  offline speech-to-text fallback
-  downloads.py    MP4 and MP3 export
   japanese.py     tokenisation and furigana alignment
 frontend/
   index.html      the whole UI
-  app.js          player sync, word list, exports, downloads
+  app.js          player sync, word list, exports
   style.css       light and dark themes
 main.py           entrypoint for serverless (Vercel) imports
 pyproject.toml    Vercel entrypoint config
@@ -285,8 +274,6 @@ No build step and no frontend framework — edit a file, reload the page.
   `base` for speed or `medium` for accuracy.
 * **Age-restricted and private videos won't load.** yt-dlp cannot reach them
   without signing in.
-* Downloading media from YouTube may conflict with its Terms of Service. The
-  caption path, which is what you will use most of the time, downloads no media.
 
 ## Licence
 

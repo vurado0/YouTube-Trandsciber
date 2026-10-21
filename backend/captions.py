@@ -103,7 +103,6 @@ def probe(url: str) -> dict:
 
     return {
         "id": info.get("id"),
-        "resolutions": _resolutions(info),
         "title": info.get("title") or "Untitled",
         "channel": info.get("uploader") or info.get("channel") or "",
         "duration": info.get("duration") or 0,
@@ -142,20 +141,6 @@ def fetch(url: str, lang: str, info: dict | None = None) -> dict:
 
 
 # --- internals -------------------------------------------------------------
-
-
-def _resolutions(info: dict) -> list[int]:
-    """Video heights this video actually offers, tallest first.
-
-    Offering a fixed menu would let someone pick 1080p on a video that only has
-    480p and quietly get something else.
-    """
-    heights = {
-        fmt["height"]
-        for fmt in info.get("formats") or []
-        if fmt.get("height") and fmt.get("vcodec", "none") != "none"
-    }
-    return sorted(heights, reverse=True)
 
 
 def _pick_track(tracks: dict, lang: str) -> dict | None:
@@ -270,4 +255,16 @@ def _chunk(events: list[dict], lang: str) -> list[dict]:
 def _clean(message: str) -> str:
     message = re.sub(r"\x1b\[[0-9;]*m", "", message)
     message = message.replace("ERROR: ", "").strip()
+
+    # The bot check is the one failure people actually hit on a hosted
+    # instance. yt-dlp's own text is a wall of flags and wiki links, which
+    # tells a visitor nothing about what went wrong or whose problem it is.
+    if "confirm you" in message and "bot" in message:
+        return (
+            "YouTube is refusing requests from this server. It blocks the "
+            "datacentre addresses that hosting providers use, so this happens "
+            "for every video, not just this one. Running the app on your own "
+            "machine works normally."
+        )
+
     return message.split("\n")[0][:300]
