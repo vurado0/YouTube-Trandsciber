@@ -113,7 +113,7 @@ Two ways round it, both with real costs:
   means: anyone who can read your environment variables has a live session for
   that Google account, YouTube may suspend an account it sees being automated,
   and the cookies expire after a few weeks. Use a throwaway account, never your
-  main one.
+  main one. Full steps under [Setting up cookies](#setting-up-cookies).
 * **A residential proxy**, which costs money and is what the commercial
   transcript services are quietly paying for.
 
@@ -167,6 +167,36 @@ TUNNEL_HOSTNAME=study.example.com ./share.sh
 The address is now stable across restarts and reboots, and there is no
 interstitial page. To have it come back by itself after a reboot, install
 cloudflared as a service with `cloudflared service install`.
+
+### Setting up cookies
+
+Only worth doing for a hosted instance; running locally never needs it.
+
+1. **Make a throwaway Google account.** Never use your real one — YouTube
+   suspends accounts it catches being automated, and the exported cookies are a
+   live session for whatever account you use.
+2. **Open a private/incognito window**, sign in to youtube.com with that
+   account, and watch a few seconds of any video.
+3. **Export the cookies** with a Netscape-format cookie extension (for example
+   "Get cookies.txt LOCALLY"), restricted to youtube.com. You want the
+   tab-separated `cookies.txt` format, not JSON.
+4. **Close the private window without signing out.** Signing out invalidates
+   the cookies you just exported; closing the window leaves them valid.
+5. **Set it on the host.** From the project directory:
+
+   ```bash
+   vercel env add YTDLP_COOKIES production < cookies.txt
+   vercel --prod
+   ```
+
+   Or paste the file's contents into the variable in the Vercel dashboard under
+   Settings → Environment Variables. The leading `# Netscape HTTP Cookie File`
+   line is added for you if your paste loses it.
+6. **Delete your local `cookies.txt`** afterwards.
+
+Expect to repeat this every few weeks when the session expires, and to find
+the account suspended eventually. If the value is not a real cookie file the
+app says so rather than failing with the bot-check error.
 
 ### Docker, for everything at once
 

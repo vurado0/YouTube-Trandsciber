@@ -42,8 +42,24 @@ def ytdlp_auth() -> dict:
         # through an environment variable on a host with no writable project
         # directory).
         path = Path(tempfile.gettempdir()) / "yt-cookies.txt"
+
+        # A Netscape cookie line is seven tab-separated fields. Check for at
+        # least one before writing: otherwise yt-dlp quietly skips the junk,
+        # carries on without cookies, and the operator sees the bot-check
+        # error instead of being told their value is wrong.
+        if not any(len(line.split("\t")) == 7 for line in cookies.splitlines()):
+            raise CaptionError(
+                "YTDLP_COOKIES is set but is not a cookie file. It needs the "
+                "tab-separated Netscape format a cookie-export extension "
+                "produces — see the README."
+            )
+
+        # yt-dlp rejects the file unless it opens with this header, which is
+        # easy to lose when pasting into a dashboard field.
+        if not cookies.lstrip().startswith(("# Netscape HTTP Cookie File", "# HTTP Cookie File")):
+            cookies = "# Netscape HTTP Cookie File\n" + cookies
         try:
-            path.write_text(cookies, "utf-8")
+            path.write_text(cookies + "\n", "utf-8")
         except OSError:
             return {}
 
@@ -259,6 +275,15 @@ def _clean(message: str) -> str:
     # The bot check is the one failure people actually hit on a hosted
     # instance. yt-dlp's own text is a wall of flags and wiki links, which
     # tells a visitor nothing about what went wrong or whose problem it is.
+    if "Netscape format cookies file" in message:
+        # Never echo the path: it is a server-side temp file and means nothing
+        # to whoever is looking at the page.
+        return (
+            "The YTDLP_COOKIES value is not a valid cookie file. It needs the "
+            "tab-separated Netscape format that a cookie-export extension "
+            "produces, not a copied header string."
+        )
+
     if "confirm you" in message and "bot" in message:
         return (
             "YouTube is refusing requests from this server. It blocks the "
