@@ -97,6 +97,10 @@ def probe(url: str) -> dict:
         "no_warnings": True,
         "skip_download": True,
         "noplaylist": True,
+        # We only ever want the caption tracks. Signed-in requests often come
+        # back with no playable video formats, which otherwise aborts the whole
+        # extraction before the subtitles are read.
+        "ignore_no_formats_error": True,
         **ytdlp_auth(),
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
@@ -123,7 +127,7 @@ def probe(url: str) -> dict:
         "channel": info.get("uploader") or info.get("channel") or "",
         "duration": info.get("duration") or 0,
         "thumbnail": info.get("thumbnail") or "",
-        "video_language": (info.get("language") or "").split("-")[0].lower(),
+        "video_language": _spoken_language(info),
         "captions": available,
         "_manual": manual,
         "_auto": auto,
@@ -157,6 +161,24 @@ def fetch(url: str, lang: str, info: dict | None = None) -> dict:
 
 
 # --- internals -------------------------------------------------------------
+
+
+def _spoken_language(info: dict) -> str:
+    """Best guess at the language actually spoken in the video.
+
+    yt-dlp's own `language` field is empty whenever the metadata comes back
+    from a signed-in request, so it cannot be relied on. YouTube keys the
+    auto-caption track for the original language as `<lang>-orig` and every
+    translation as `<target>-<source>`, which identifies it regardless.
+    """
+    reported = (info.get("language") or "").split("-")[0].lower()
+    if reported:
+        return reported
+
+    for key in info.get("automatic_captions") or {}:
+        if key.endswith("-orig"):
+            return key[: -len("-orig")].split("-")[0].lower()
+    return ""
 
 
 def _pick_track(tracks: dict, lang: str) -> dict | None:

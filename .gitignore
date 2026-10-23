@@ -3,3 +3,6 @@ cache/
 __pycache__/
 .vercel
 .env*
+cookies*.txt
+*cookies.txt
+.env.local

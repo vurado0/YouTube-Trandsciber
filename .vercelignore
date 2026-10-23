@@ -7,3 +7,5 @@ fly.toml
 requirements-whisper.txt
 __pycache__/
 *.pyc
+cookies*.txt
+*cookies.txt

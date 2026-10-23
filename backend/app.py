@@ -291,9 +291,13 @@ def _finish(job_id: str, meta: dict, result: dict):
 def _choose_language(lang: str, info: dict) -> str | None:
     if lang in captions.SUPPORTED:
         return lang
+
     video_language = info.get("video_language")
     if video_language in captions.SUPPORTED:
         return video_language
+
+    # Nothing identified the spoken language (a video with only creator-written
+    # tracks and no auto-captions). Fall back to whatever we support.
     for candidate in ("en", "de", "ja"):
         if candidate in info["captions"]:
             return candidate
