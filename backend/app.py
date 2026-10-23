@@ -70,6 +70,16 @@ except OSError:
     # Read-only filesystem: run without caching rather than refusing to start.
     CACHING = False
 
+# Fingerprint of the backend source, so /api/capabilities identifies the build.
+BUILD = hashlib.sha256(
+    b"".join(
+        sorted(
+            path.read_bytes()
+            for path in Path(__file__).resolve().parent.glob("*.py")
+        )
+    )
+).hexdigest()[:8]
+
 app = FastAPI(title="Transcript Study")
 
 _jobs: dict[str, dict] = {}
@@ -140,6 +150,9 @@ def capabilities():
         "max_duration": MAX_DURATION,
         "serverless": SERVERLESS,
         "dictionary": japanese.DICTIONARY,
+        # Lets a deploy be identified from outside; without it a stale function
+        # is indistinguishable from a fix that did not work.
+        "build": BUILD,
     }
 
 
