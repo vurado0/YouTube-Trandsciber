@@ -6,7 +6,7 @@ import json
 import os
 import re
 import tempfile
-import urllib.request
+import time
 from pathlib import Path
 
 import yt_dlp
@@ -14,6 +14,7 @@ import yt_dlp
 SUPPORTED = {"en": "English", "de": "Deutsch", "ja": "日本語"}
 
 # Sentence-ish boundaries for the three supported languages.
+_JAPANESE = re.compile(r"[\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]")
 _SENTENCE_END = re.compile(r"[.!?。！？…]['\")\]」』]?\s*$")
 _MAX_CHUNK_SECONDS = 9.0
 _MAX_CHUNK_CHARS = 180
@@ -175,9 +176,23 @@ def _spoken_language(info: dict) -> str:
     if reported:
         return reported
 
-    for key in info.get("automatic_captions") or {}:
-        if key.endswith("-orig"):
-            return key[: -len("-orig")].split("-")[0].lower()
+    originals = [
+        key[: -len("-orig")].split("-")[0].lower()
+        for key in info.get("automatic_captions") or {}
+        if key.endswith("-orig")
+    ]
+    if len(originals) == 1:
+        return originals[0]
+
+    if originals:
+        # A dubbed video carries one `-orig` track per audio language, so there
+        # is no single original. Japanese is decidable from the title's script;
+        # English and German both use Latin script and stay ambiguous.
+        if "ja" in originals and _JAPANESE.search(info.get("title") or ""):
+            return "ja"
+        for candidate in ("en", "de", "ja"):
+            if candidate in originals:
+                return candidate
     return ""
 
 
@@ -208,11 +223,30 @@ def _pick_track(tracks: dict, lang: str) -> dict | None:
 
 
 def _download(url: str) -> dict:
-    request = urllib.request.Request(
-        url, headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "en,de,ja"}
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return json.loads(response.read().decode("utf-8"))
+    """Fetch a caption track through yt-dlp's own HTTP session.
+
+    A bare urllib request carries none of the cookies or headers that got us
+    the track URL in the first place, so YouTube answers it with 429 on any
+    address it is already throttling — the metadata lookup succeeds and then
+    the actual captions fail.
+    """
+    opts = {"quiet": True, "no_warnings": True, **ytdlp_auth()}
+    last = None
+    for attempt in range(3):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return json.loads(ydl.urlopen(url).read().decode("utf-8"))
+        except Exception as exc:  # includes HTTP 429
+            last = exc
+            if "429" not in str(exc) or attempt == 2:
+                break
+            time.sleep(1.5 * (attempt + 1))
+
+    if last and "429" in str(last):
+        raise CaptionError(
+            "YouTube is rate-limiting this server. Wait a minute and try again."
+        )
+    raise CaptionError(f"Could not download the captions: {_clean(str(last))}")
 
 
 def _parse_json3(data: dict) -> list[dict]:
